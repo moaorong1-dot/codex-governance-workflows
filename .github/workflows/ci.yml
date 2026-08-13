@@ -1,0 +1,45 @@
+name: Public governance workflow checks
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    name: validate public governance workflow
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262
+
+      - name: validate fixed workflow boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          workflow=.github/workflows/attest-governance-evidence.yml
+
+          python3 - <<'PY'
+          from hashlib import sha256
+          from pathlib import Path
+
+          workflow = Path(".github/workflows/attest-governance-evidence.yml")
+          text = workflow.read_text(encoding="utf-8")
+          expected = "231814f8b9b7725e18da918a2643a88d3c8b8894f5672a6696f7928903f548a4"
+          assert sha256(workflow.read_bytes()).hexdigest() == expected, "workflow hash changed; update the reviewed source and README together"
+          assert expected in Path("README.md").read_text(encoding="utf-8"), "README must state the reviewed workflow hash"
+          assert "workflow_call:" in text
+          assert "contents: read" in text and "pull-requests: read" in text
+          assert "actions/checkout" not in text
+          for forbidden in ("git fetch", "git checkout", "git clone", "gh pr checkout", "subprocess", "importlib", "os.system", "Popen("):
+              assert forbidden not in text, f"forbidden execution primitive: {forbidden}"
+          print("public workflow integrity and read-only boundary passed")
+          PY
+
+          sed -n '/^          # GOVERNANCE_EVIDENCE_VALIDATOR_BEGIN$/,/^          # GOVERNANCE_EVIDENCE_VALIDATOR_END$/p' "$workflow" \
+            | sed 's/^          //' \
+            | PYTHONDONTWRITEBYTECODE=1 python3 - --self-test
